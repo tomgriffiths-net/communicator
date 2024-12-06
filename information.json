@@ -1,0 +1,10 @@
+{
+    "dependencies": {
+        "settings": 2
+    },
+    "id_name": "communicator",
+    "version": 1,
+    "author": "tom",
+    "name": "Communicator Lib",
+    "description": ""
+}
