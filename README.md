@@ -1,5 +1,5 @@
 # communicator
-This is a package for PHP-CLI.
+This is a package for PHP-CLI that provides communication functions.
 
 # Use
 To use this program in your own project:
