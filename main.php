@@ -100,7 +100,7 @@ class communicator{
         return $socket;
     }
     public static function acceptConnection($socketServer, float|false $timeout):mixed{
-        if($timeout !== false){
+        if(!is_float($timeout)){
             $timeout = null;
         }
         return @stream_socket_accept($socketServer, $timeout);

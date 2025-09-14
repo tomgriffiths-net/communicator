@@ -1,10 +1,10 @@
 {
+    "id_name": "communicator",
+    "name": "Communicator Library",
+    "version": 5,
+    "author": "tom",
+    "description": "",
     "dependencies": {
         "settings": 2
-    },
-    "id_name": "communicator",
-    "version": 4,
-    "author": "tom",
-    "name": "Communicator Lib",
-    "description": ""
+    }
 }
