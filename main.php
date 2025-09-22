@@ -14,27 +14,77 @@ class communicator{
     }
     public static function init(){
         if(!settings::isset('name')){
-            self::setName(gethostname());
+            $hostname = gethostname();
+            if(!is_string($hostname)){
+                mklog(2, 'Failed to get pc name, setting it to unknown');
+                $hostname = 'unknown';
+            }
+            if(!settings::set('name', $hostname)){
+                mklog(2, 'Failed to set pc name');
+            }
         }
         if(!settings::isset('password')){
-            self::setPassword("password");
+            echo "Communicator has no password set, would you like to set this?\n";
+            if(user_input::yesNo()){
+                retry:
+                echo "Please enter a password\n";
+                $pass1 = user_input::await();
+                echo "Please repeat the password\n";
+                $pass2 = user_input::await();
+                if($pass1 !== $pass2){
+                    echo "The passwords did not match, try again?\n";
+                    if(user_input::yesNo()){
+                        goto retry;
+                    }
+                    else{
+                        goto defpass;
+                    }
+                }
+                else{
+                    $password = $pass1;
+                }
+            }
+            else{
+                defpass:
+                echo "Setting communicator password to \"password\"\n";
+                $password = 'password';
+            }
+
+            if(!settings::set('password', base64_encode($password))){
+                mklog(2, 'Failed to set password');
+            }
+        }
+
+        $defaultSettings = [
+            'whitelist' => [],
+            'whitelistEnabled' => false,
+            'blacklist' => ['unknown'],
+        ];
+
+        foreach($defaultSettings as $settingName => $settingValue){
+            if(!settings::isset($settingName)){
+                if(!settings::set($settingName, $settingValue)){
+                    mklog(2, 'Failed to set setting ' . $settingName);
+                }
+            }
         }
     }
     // Settings
-    public static function setName(string $name):bool{
-        return settings::set('name',$name,true);
-    }
     public static function getName():string|bool{
         return settings::read('name');
     }
-    public static function setPassword(string $password):bool{
-        return settings::set('password',base64_encode($password),true);
+    public static function setPassword(string $password, string $oldPassword):bool{
+        if(!self::verifyPassword($oldPassword)){
+            mklog(2, 'Failed to set password as an incorrect old password was provided');
+            return false;
+        }
+        return settings::set('password', base64_encode($password), true);
     }
     public static function getPasswordEncoded():string|bool{
         return settings::read('password');
     }
-    public static function verifyPassword(string $password):bool{
-        return ($password === self::getPasswordEncoded());
+    public static function verifyPassword(string $encodedPassword):bool{
+        return (self::getPasswordEncoded() === $encodedPassword);
     }
     // Data
     public static function send($stream, string $data):bool{
@@ -76,6 +126,106 @@ class communicator{
             }
         }
         return false;
+    }
+    public static function sendData($stream, mixed $data, bool $auth=true):bool{
+        if(!is_resource($stream)){
+            return false;
+        }
+
+        $message['name'] = communicator::getName();
+        if(!is_string($message['name'])){
+            mklog(2, 'Failed to get communicator name');
+            return false;
+        }
+
+        if($auth){
+            $message['password'] = communicator::getPasswordEncoded();
+            if(!is_string($message['password'])){
+                mklog(2, 'Failed to get encoded communicator password');
+                return false;
+            }
+        }
+
+        $message['time'] = time();
+        $message['data'] = $data;
+
+        $message = json_encode($message);
+        if(!is_string($message)){
+            mklog(2, 'Failed to encode data');
+            return false;
+        }
+
+        $message = base64_encode($message);
+
+        return self::send($stream, $message);
+    }
+    public static function receiveData($stream, bool $auth=true):mixed{
+        if(!is_resource($stream)){
+            return false;
+        }
+
+        $message = self::receive($stream);
+        if(!is_string($message)){
+            mklog(2, 'Failed to receive data');
+            return false;
+        }
+
+        $message = base64_decode($message);
+        if(!is_string($message)){
+            mklog(2, 'Failed to decode message (base64)');
+            return false;
+        }
+
+        $message = json_decode($message, true);
+        if(!is_array($message)){
+            mklog(2, 'Failed to decode message (json)');
+            return false;
+        }
+
+        if(!isset($message['name']) || !is_string($message['name'])){
+            mklog(2, 'Message sender did not send a name');
+            return false;
+        }
+
+        if(settings::read('whitelistEnabled')){
+            $whitelist = settings::read('whitelist');
+            if(!is_array($whitelist)){
+                mklog(2, 'Failed to read whitelist');
+                return false;
+            }
+            if(!in_array(strtolower($message['name']), $whitelist)){
+                mklog(2, 'Message sender not in whitelist');
+                return false;
+            }
+        }
+
+        $blacklist = settings::read('blacklist');
+        if(!is_array($blacklist)){
+            mklog(2, 'Failed to read blacklist');
+            return false;
+        }
+        if(in_array(strtolower($message['name']), $blacklist)){
+            mklog(2, 'Message sender in blacklist');
+            return false;
+        }
+
+        if($auth){
+            if(!isset($message['password']) || !is_string($message['password'])){
+                mklog(2, 'Message sender did not send authentication');
+                return false;
+            }
+            if(!self::verifyPassword($message['password'])){
+                mklog(2, 'Message sender attached incorrect authentication');
+                return false;
+            }
+        }
+
+        if(!isset($message['data'])){
+            mklog(2, 'Message sender did not attach any data');
+            return false;
+        }
+
+        return $message['data'];
     }
     // Actions
     public static function close($stream):bool{
