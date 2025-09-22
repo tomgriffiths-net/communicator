@@ -1,7 +1,7 @@
 {
     "id_name": "communicator",
     "name": "Communicator Library (Dev)",
-    "version": 6,
+    "version": 7,
     "author": "tom",
     "description": "",
     "dependencies": {
