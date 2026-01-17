@@ -25,3 +25,4 @@ This is a package for PHP-CLI that provides communication functions.
 - **connect(string $ip, int $port, float|false $timeout, &$socketErrorCode, &$socketErrorString):mixed**: Connects to a socket server, returns the connection stream on success or false on failure.
 - **createServer(string $ip, int $port, int|false $timeout, &$socketErrorCode, &$socketErrorString):mixed**: Creates a socket server, returns the server socket on success or false on failure.
 - **acceptConnection($socketServer, float|false $timeout):mixed**: Accepts a client connection to a socket server, returns the client stream on success or false on failure.
+- **getLastReceivedName()**: Returns the name of the sender of the last message read with receiveData.

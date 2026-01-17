@@ -1,5 +1,6 @@
 <?php
 class communicator{
+    private static $lastReceivedName = "";
     public static function command($line):void{
         if($line === "begin"){
             if(class_exists('communicator_server')){
@@ -132,14 +133,14 @@ class communicator{
             return false;
         }
 
-        $message['name'] = communicator::getName();
+        $message['name'] = self::getName();
         if(!is_string($message['name'])){
             mklog(2, 'Failed to get communicator name');
             return false;
         }
 
         if($auth){
-            $message['password'] = communicator::getPasswordEncoded();
+            $message['password'] = self::getPasswordEncoded();
             if(!is_string($message['password'])){
                 mklog(2, 'Failed to get encoded communicator password');
                 return false;
@@ -186,6 +187,8 @@ class communicator{
             mklog(2, 'Message sender did not send a name');
             return false;
         }
+
+        self::$lastReceivedName = $message['name'];
 
         if(settings::read('whitelistEnabled')){
             $whitelist = settings::read('whitelist');
@@ -254,5 +257,8 @@ class communicator{
             $timeout = null;
         }
         return @stream_socket_accept($socketServer, $timeout);
+    }
+    public static function getLastReceivedName():string{
+        return self::$lastReceivedName;
     }
 }
