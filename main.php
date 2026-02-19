@@ -89,22 +89,34 @@ class communicator{
     }
     // Data
     public static function send($stream, string $data):bool{
-        $dataLength = strlen($data);
-        if(strlen($dataLength) <= 20){
-            if(fwrite($stream,$dataLength,20) !== false){
-                if(fread($stream,2) === "OK"){
-                    $sent = fwrite($stream,$data,$dataLength);
-                    if($sent !== false){
-                        if(fread($stream,2) === "OK"){
-                            return true;
-                        }
+        if(!is_resource($stream)){
+            return false;
+        }
+        $dataLength = strlen($data); //int is 19 digits
+        if(fwrite($stream,$dataLength,20) !== false){
+            if(fread($stream,2) === "OK"){
+
+                $totalSent = 0;
+                while($totalSent < $dataLength){
+                    $sent = fwrite($stream, substr($data, $totalSent));
+                    if(!$sent){
+                        echo "Failed to write any bytes to stream\n";
+                        return false;
                     }
+                    $totalSent += $sent;
+                }
+
+                if(fread($stream,2) === "OK"){
+                    return true;
                 }
             }
         }
         return false;
     }
     public static function receive($stream):string|bool{
+        if(!is_resource($stream)){
+            return false;
+        }
         $responseLength = fread($stream,20);
         if($responseLength !== false){
             fwrite($stream,"OK",2);
@@ -229,6 +241,151 @@ class communicator{
         }
 
         return $message['data'];
+    }
+    public static function sendFromFile($stream, string $file, bool $showProgress=true, int $chunkSize=262144):bool{
+        if(!is_resource($stream)){
+            return false;
+        }
+
+        if(!is_file($file)){
+            mklog(2, "Input file does not exist");
+            return false;
+        }
+
+        $size = filesize($file);
+        if(!$size){
+            mklog(2, "Failed to get file size");
+            return false;
+        }
+
+        $file = fopen($file, "rb");
+        if(!is_resource($file)){
+            mklog(2, "Failed to open file");
+            return false;
+        }
+
+        if(!self::send($stream, "fileSendStart")){
+            mklog(2, "Failed to send initial message");
+            @fclose($file);
+            return false;
+        }
+
+        if(!self::send($stream, $size)){
+            mklog(2, "Failed to send file size");
+            @fclose($file);
+            return false;
+        }
+
+        $total = 0;
+        $lastStatus = microtime(true);
+
+        while(!feof($file)){
+            $chunk = fread($file, $chunkSize);
+            if(!is_string($chunk)){
+                mklog(2, "Failed to read chunk");
+                @fclose($file);
+                return false;
+            }
+
+            $currentChunkSize = strlen($chunk);
+
+            if(!self::send($stream, $chunk)){
+                mklog(2, "Failed to send chunk");
+                @fclose($file);
+                return false;
+            }
+
+            if($showProgress){
+                $total += $currentChunkSize;
+                if(microtime(true) - $lastStatus > 0.1){
+                    echo files::progressTracker($size, $total);
+                    $lastStatus = microtime(true);
+                }
+            }
+        }
+
+        @fclose($file);
+
+        if(self::receive($stream) !== "OK"){
+            mklog(2, "Receiver failed to receive all chunks");
+            return false;
+        }
+
+        return true;
+    }
+    public static function receiveFile($stream, string $fileName, bool $showProgress=true, bool $overwrite=true):bool{
+        if(is_file($fileName) && !$overwrite){
+            mklog(2, "File allready exists");
+            return false;
+        }
+
+        if(!files::mkFile($fileName, "", "wb", true)){
+            mklog(2, "Failed to create destination file");
+            return false;
+        }
+
+        if(!is_resource($stream)){
+            return false;
+        }
+
+        if(self::receive($stream) !== "fileSendStart"){
+            mklog(2, "Did not receive file send initiation");
+            return false;
+        }
+
+        $total = intval(self::receive($stream));
+        if($total < 1){
+            mklog(2, "Did not receive file size");
+            return false;
+        }
+
+        $file = fopen($fileName, "wb");
+        if(!is_resource($file)){
+            mklog(2, "Failed to open destination file");
+            return false;
+        }
+
+        $current = 0;
+        $lastStatus = microtime(true);
+
+        while($current < $total){
+            $chunk = self::receive($stream);
+            if(!is_string($chunk)){
+                mklog(2, "Failed to receive a chunk");
+                @fclose($file);
+                return false;
+            }
+
+            $chunkLength = strlen($chunk);
+
+            if(fwrite($file, $chunk) !== $chunkLength){
+                mklog(2, "Failed to write chunk");
+                @fclose($file);
+                return false;
+            }
+
+            $current += $chunkLength;
+
+            if($showProgress){
+                if(microtime(true) - $lastStatus > 0.1){
+                    echo files::progressTracker($total, $current);
+                    $lastStatus = microtime(true);
+                }
+            }
+        }
+
+        if(!self::send($stream, "OK")){
+            mklog(2, "Failed to write chunk");
+            @fclose($file);
+            return false;
+        }
+
+        if(!fclose($file)){
+            mklog(2, "Failed to close file handle");
+            return false;
+        }
+
+        return true;
     }
     // Actions
     public static function close($stream):bool{

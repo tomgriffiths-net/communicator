@@ -21,6 +21,8 @@ This is a package for PHP-CLI that provides communication functions.
 - **receive($stream):string|bool**: Receives a string of any length sent by send function from a stream, returns the string on success or false on failure.
 - **sendData($stream, mixed $data, bool $auth=true):bool**: Sends json-encodeable data to a stream, must be read with receiveData function, incorperates name and password, returns true on success or false on failure.
 - **receiveData($stream, bool $auth=true):mixed**: Receives data from a stream sent with sendData function, incorperates password, whitelist and blacklist, returns the data on success or false on failure.
+- **sendFromFile($stream, string $file, bool $showProgress=true, int $chunkSize=262144):bool**: Sends a file over a stream in chunks, the other side must use receiveFile(), returns true on success or false on failure.
+- **receiveFile($stream, string $fileName, bool $showProgress=true, bool $overwrite=true):bool**: Receives a file on a stream from sendFromFile(), returns true on success or false on failure.
 - **close($stream):bool**: Closes a stream, returns true on success or false on failure.
 - **connect(string $ip, int $port, float|false $timeout, &$socketErrorCode, &$socketErrorString):mixed**: Connects to a socket server, returns the connection stream on success or false on failure.
 - **createServer(string $ip, int $port, int|false $timeout, &$socketErrorCode, &$socketErrorString):mixed**: Creates a socket server, returns the server socket on success or false on failure.
