@@ -375,7 +375,7 @@ class communicator{
         }
 
         if(!self::send($stream, "OK")){
-            mklog(2, "Failed to write chunk");
+            mklog(2, "Failed to send ok");
             @fclose($file);
             return false;
         }
