@@ -1,6 +1,11 @@
 <?php
 class communicator{
     private static $lastReceivedName = "";
+    private static $hostname = "unknown";
+    private static $passwordEncoded = "";
+    private static $blacklist = [];
+    private static $whitelist = [];
+    private static $whitelistEnabled = false;
     public static function command($line):void{
         if($line === "begin"){
             if(class_exists('communicator_server')){
@@ -13,7 +18,7 @@ class communicator{
             }
         }
     }
-    public static function init(){
+    public static function init():void{
         if(!settings::isset('name')){
             $hostname = gethostname();
             if(!is_string($hostname)){
@@ -69,10 +74,30 @@ class communicator{
                 }
             }
         }
+
+        $hostname = settings::read('name');
+        if(is_string($hostname) && !empty($hostname)){self::$hostname = $hostname;}
+        else{mklog(2, "Failed to load name");}
+
+        $passwordEncoded = settings::read('password');
+        if(is_string($passwordEncoded)){self::$passwordEncoded = $passwordEncoded;}
+        else{mklog(2, "Failed to check encoded password");}
+
+        $blacklist = settings::read('blacklist');
+        if(is_array($blacklist)){self::$blacklist = $blacklist;}
+        else{mklog(2, "Failed to load blacklist");}
+        
+        $whitelist = settings::read('whitelist');
+        if(is_array($whitelist)){self::$whitelist = $whitelist;}
+        else{mklog(2, "Failed to load whitelist");}
+
+        $whitelistEnabled = settings::read('whitelistEnabled');
+        if(is_bool($whitelistEnabled)){self::$whitelistEnabled = $whitelistEnabled;}
+        else{mklog(2, "Failed to read whitelistEnabled");}
     }
     // Settings
     public static function getName():string|bool{
-        return settings::read('name');
+        return self::$hostname;
     }
     public static function setPassword(string $password, string $oldPassword):bool{
         if(!self::verifyPassword($oldPassword)){
@@ -82,7 +107,7 @@ class communicator{
         return settings::set('password', base64_encode($password), true);
     }
     public static function getPasswordEncoded():string|bool{
-        return settings::read('password');
+        return self::$passwordEncoded;
     }
     public static function verifyPassword(string $encodedPassword):bool{
         return (self::getPasswordEncoded() === $encodedPassword);
@@ -202,24 +227,15 @@ class communicator{
 
         self::$lastReceivedName = $message['name'];
 
-        if(settings::read('whitelistEnabled')){
-            $whitelist = settings::read('whitelist');
-            if(!is_array($whitelist)){
-                mklog(2, 'Failed to read whitelist');
-                return false;
-            }
-            if(!in_array(strtolower($message['name']), $whitelist)){
+        if(self::$whitelistEnabled){
+            if(!in_array(strtolower($message['name']), self::$whitelist)){
                 mklog(2, 'Message sender not in whitelist');
                 return false;
             }
         }
 
-        $blacklist = settings::read('blacklist');
-        if(!is_array($blacklist)){
-            mklog(2, 'Failed to read blacklist');
-            return false;
-        }
-        if(in_array(strtolower($message['name']), $blacklist)){
+        
+        if(in_array(strtolower($message['name']), self::$blacklist)){
             mklog(2, 'Message sender in blacklist');
             return false;
         }
