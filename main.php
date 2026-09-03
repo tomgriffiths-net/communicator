@@ -75,6 +75,10 @@ class communicator{
             }
         }
 
+        if(!extensions::ensure("sockets")){
+            mklog(2, "Sockets extension is not enabled, an attempt has been made to enable it, please restart for the change to take effect.");
+        }
+
         $hostname = settings::read('name');
         if(is_string($hostname) && !empty($hostname)){self::$hostname = $hostname;}
         else{mklog(2, "Failed to load name");}
@@ -96,7 +100,7 @@ class communicator{
         else{mklog(2, "Failed to read whitelistEnabled");}
     }
     // Settings
-    public static function getName():string|bool{
+    public static function getName():string{
         return self::$hostname;
     }
     public static function setPassword(string $password, string $oldPassword):bool{
@@ -106,70 +110,59 @@ class communicator{
         }
         return settings::set('password', base64_encode($password), true);
     }
-    public static function getPasswordEncoded():string|bool{
+    public static function getPasswordEncoded():string{
         return self::$passwordEncoded;
     }
     public static function verifyPassword(string $encodedPassword):bool{
         return (self::getPasswordEncoded() === $encodedPassword);
     }
     // Data
-    public static function send($stream, string $data):bool{
-        if(!is_resource($stream)){
-            return false;
-        }
+    public static function send(Socket $socket, string $data):bool{
         $dataLength = strlen($data); //int is 19 digits
-        if(fwrite($stream,$dataLength,20) !== false){
-            if(fread($stream,2) === "OK"){
-
-                $totalSent = 0;
-                while($totalSent < $dataLength){
-                    $sent = fwrite($stream, substr($data, $totalSent));
-                    if(!$sent){
-                        echo "Failed to write any bytes to stream\n";
-                        return false;
-                    }
-                    $totalSent += $sent;
-                }
-
-                if(fread($stream,2) === "OK"){
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-    public static function receive($stream):string|bool{
-        if(!is_resource($stream)){
-            return false;
-        }
-        $responseLength = fread($stream,20);
-        if($responseLength !== false){
-            fwrite($stream,"OK",2);
-            $responseLength = intval($responseLength);
-            if($responseLength > 0){
-                $response = "";
-                while(strlen($response) < $responseLength){
-                    $read = fread($stream,8192);
-                    if($read !== false){
-                        $response .= $read;
-                    }
-                    else{
-                        break;
-                    }
-                }
-                
-                fwrite($stream,"OK",2);
-                return $response;
-                
-            }
-        }
-        return false;
-    }
-    public static function sendData($stream, mixed $data, bool $auth=true):bool{
-        if(!is_resource($stream)){
+        if(!socket_write($socket, (string) $dataLength, 20)){
             return false;
         }
 
+        if(socket_read($socket, 2, PHP_BINARY_READ) !== "OK"){
+            return false;
+        }
+
+        $totalSent = 0;
+        while($totalSent < $dataLength){
+            $sent = socket_write($socket, substr($data, $totalSent), 8192);
+            if(!$sent){
+                echo "Failed to write any bytes to stream\n";
+                return false;
+            }
+            $totalSent += $sent;
+        }
+
+        return socket_read($socket, 2, PHP_BINARY_READ) === "OK";
+    }
+    public static function receive(Socket $socket):?string{
+        $responseLength = socket_read($socket, 20);
+        if(!$responseLength){//also checks for string of "0"
+            return null;
+        }
+
+        socket_write($socket, "OK", 2);
+        
+        $response = "";
+        while(strlen($response) < $responseLength){
+            $read = socket_read($socket, 8192, PHP_BINARY_READ);
+            if($read !== false){
+                $response .= $read;
+            }
+            else{
+                break;
+            }
+        }
+        
+        socket_write($socket, "OK", 2);
+        return $response;
+
+    }
+    public static function sendData(Socket $socket, mixed $data, bool $auth=true):bool{
         $message['name'] = self::getName();
         if(!is_string($message['name'])){
             mklog(2, 'Failed to get communicator name');
@@ -195,14 +188,10 @@ class communicator{
 
         $message = base64_encode($message);
 
-        return self::send($stream, $message);
+        return self::send($socket, $message);
     }
-    public static function receiveData($stream, bool $auth=true):mixed{
-        if(!is_resource($stream)){
-            return false;
-        }
-
-        $message = self::receive($stream);
+    public static function receiveData(Socket $socket, bool $auth=true):mixed{
+        $message = self::receive($socket);
         if(!is_string($message)){
             mklog(2, 'Failed to receive data');
             return false;
@@ -258,11 +247,7 @@ class communicator{
 
         return $message['data'];
     }
-    public static function sendFromFile($stream, string $file, bool $showProgress=true, int $chunkSize=262144):bool{
-        if(!is_resource($stream)){
-            return false;
-        }
-
+    public static function sendFromFile(Socket $socket, string $file, bool $showProgress=true, int $chunkSize=262144):bool{
         if(!is_file($file)){
             mklog(2, "Input file does not exist");
             return false;
@@ -280,13 +265,13 @@ class communicator{
             return false;
         }
 
-        if(!self::send($stream, "fileSendStart")){
+        if(!self::send($socket, "fileSendStart")){
             mklog(2, "Failed to send initial message");
             @fclose($file);
             return false;
         }
 
-        if(!self::send($stream, $size)){
+        if(!self::send($socket, $size)){
             mklog(2, "Failed to send file size");
             @fclose($file);
             return false;
@@ -305,7 +290,7 @@ class communicator{
 
             $currentChunkSize = strlen($chunk);
 
-            if(!self::send($stream, $chunk)){
+            if(!self::send($socket, $chunk)){
                 mklog(2, "Failed to send chunk");
                 @fclose($file);
                 return false;
@@ -322,14 +307,14 @@ class communicator{
 
         @fclose($file);
 
-        if(self::receive($stream) !== "OK"){
+        if(self::receive($socket) !== "OK"){
             mklog(2, "Receiver failed to receive all chunks");
             return false;
         }
 
         return true;
     }
-    public static function receiveFile($stream, string $fileName, bool $showProgress=true, bool $overwrite=true):bool{
+    public static function receiveFile(Socket $socket, string $fileName, bool $showProgress=true, bool $overwrite=true):bool{
         if(is_file($fileName) && !$overwrite){
             mklog(2, "File allready exists");
             return false;
@@ -340,16 +325,12 @@ class communicator{
             return false;
         }
 
-        if(!is_resource($stream)){
-            return false;
-        }
-
-        if(self::receive($stream) !== "fileSendStart"){
+        if(self::receive($socket) !== "fileSendStart"){
             mklog(2, "Did not receive file send initiation");
             return false;
         }
 
-        $total = intval(self::receive($stream));
+        $total = intval(self::receive($socket));
         if($total < 1){
             mklog(2, "Did not receive file size");
             return false;
@@ -365,7 +346,7 @@ class communicator{
         $lastStatus = microtime(true);
 
         while($current < $total){
-            $chunk = self::receive($stream);
+            $chunk = self::receive($socket);
             if(!is_string($chunk)){
                 mklog(2, "Failed to receive a chunk");
                 @fclose($file);
@@ -390,7 +371,7 @@ class communicator{
             }
         }
 
-        if(!self::send($stream, "OK")){
+        if(!self::send($socket, "OK")){
             mklog(2, "Failed to send ok");
             @fclose($file);
             return false;
@@ -404,32 +385,131 @@ class communicator{
         return true;
     }
     // Actions
-    public static function close($stream):bool{
-        return @fclose($stream);
+    public static function close(Socket $socket):true{
+        socket_close($socket);
+        return true;
     }
-    public static function connect(string $ip, int $port, float|false $timeout, &$socketErrorCode, &$socketErrorString):mixed{
-        if($timeout === false){
-            $timeout = null;
-        }
-        return @stream_socket_client("tcp://$ip:$port", $socketErrorCode, $socketErrorString, $timeout);
-    }
-    public static function createServer(string $ip, int $port, int|false $timeout, &$socketErrorCode, &$socketErrorString):mixed{
-        $socket = @stream_socket_server("tcp://$ip:$port", $socketErrorCode, $socketErrorString);
+    public static function connect(string $ip, int $port, float|false $timeout, &$socketErrorString):?Socket{
+        $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
         if($socket === false){
-            return false;
+            $socketErrorString = socket_strerror(socket_last_error());
+            return null;
         }
-        if($timeout !== false){
-            if(@stream_set_timeout($socket, $timeout) === false){
-                return false;
+
+        // Set non‑blocking to allow a connection timeout
+        socket_set_nonblock($socket);
+
+        if(!@socket_connect($socket, $ip, $port)){
+            $error = socket_last_error($socket);
+            // In non‑blocking mode, connection may be in progress
+            if(!in_array($error, [SOCKET_EINPROGRESS, SOCKET_EALREADY, SOCKET_EWOULDBLOCK])){
+                // Immediate failure
+                $socketErrorString = socket_strerror($error);
+                socket_close($socket);
+                return null;
             }
+
+            $read = null;
+            $write = [$socket];
+            $except = [$socket];
+
+            if($timeout === false){
+                $timeoutSec = null;
+                $timeoutUsec = null;
+            }
+            else{
+                $timeoutSec = (int) $timeout;
+                $timeoutUsec = (int) (($timeout - $timeoutSec) * 1_000_000);
+            }
+
+            $selectResult = @socket_select($read, $write, $except, $timeoutSec, $timeoutUsec);
+
+            if($selectResult === false){
+                $socketErrorString = socket_strerror(socket_last_error($socket));
+                socket_close($socket);
+                return null;
+            }
+
+            if($selectResult === 0){
+                $socketErrorString = 'Connection timed out';
+                socket_close($socket);
+                return null;
+            }
+
+            // Check the socket error status after select
+            $soError = socket_get_option($socket, SOL_SOCKET, SO_ERROR);
+            if($soError !== 0){
+                $socketErrorString = socket_strerror($soError);
+                socket_close($socket);
+                return null;
+            }
+
+            // Success – set back to blocking mode
         }
+
+        // Connection succeeded immediately or wait success
+        socket_set_block($socket);
+        $socketErrorString = '';
+        @socket_set_option($socket, SOL_TCP, TCP_NODELAY, 1);
         return $socket;
     }
-    public static function acceptConnection($socketServer, float|false $timeout):mixed{
-        if(!is_float($timeout)){
-            $timeout = null;
+    public static function createServer(string $ip, int $port, int|false $timeout, &$socketErrorString):?Socket{
+        $socket = socket_create(AF_INET, SOCK_STREAM, SOL_TCP);
+        if($socket === false){
+            $socketErrorString = socket_strerror(socket_last_error());
+            return null;
         }
-        return @stream_socket_accept($socketServer, $timeout);
+
+        // Allow reusing the address (similar to stream behaviour)
+        socket_set_option($socket, SOL_SOCKET, SO_REUSEADDR, 1);
+
+        if(!@socket_bind($socket, $ip, $port)){
+            $socketErrorString = socket_strerror(socket_last_error($socket));
+            socket_close($socket);
+            return null;
+        }
+
+        if(!@socket_listen($socket)){
+            $socketErrorString = socket_strerror(socket_last_error($socket));
+            socket_close($socket);
+            return null;
+        }
+
+        // Optionally set timeouts on the server socket (for parity with original)
+        if($timeout !== false){
+            $timeoutSec = (int) $timeout;
+            $timeoutUsec = (int) (($timeout - $timeoutSec) * 1_000_000);
+            $timeoutArray = ['sec' => $timeoutSec, 'usec' => $timeoutUsec];
+
+            socket_set_option($socket, SOL_SOCKET, SO_RCVTIMEO, $timeoutArray);
+            socket_set_option($socket, SOL_SOCKET, SO_SNDTIMEO, $timeoutArray);
+        }
+
+        $socketErrorCode = 0;
+        $socketErrorString = '';
+        return $socket;
+    }
+    public static function acceptConnection(Socket $socketServer, ?float $timeout=null):?Socket{
+        if($timeout !== null){
+            // Non‑blocking accept with timeout using socket_select
+            $read = [$socketServer];
+            $write = null;
+            $except = null;
+
+            $timeoutSec = (int) $timeout;
+            $timeoutUsec = (int) (($timeout - $timeoutSec) * 1_000_000);
+
+            $selectResult = @socket_select($read, $write, $except, $timeoutSec, $timeoutUsec);
+
+            if(!$selectResult){
+                // Error or timeout
+                return null;
+            }
+        }
+
+        $client = @socket_accept($socketServer);
+        @socket_set_option($client, SOL_TCP, TCP_NODELAY, 1);
+        return $client === false ? false : $client;
     }
     public static function getLastReceivedName():string{
         return self::$lastReceivedName;
